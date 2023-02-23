@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: MISW4202-202311 Experiment 1 (Viper)
+Resources:
+  ViperApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: Viper-API
+      StageName: api
+      Cors:
+        AllowOrigin: "'*'"
+        AllowMethods: "'GET,POST,PUT,DELETE,HEAD,PATCH,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+  PurchaseOrderTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Viper-PurchaseOrder
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+  RouteTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Viper-Route
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+  PurchaseOrderExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Viper-PurchaseOrder-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+    DependsOn:
+    - PurchaseOrderTable
+  DeliveryExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Viper-Delivery-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+    DependsOn:
+    - RouteTable
+  PurchaseOrderExecutionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: Viper-PurchaseOrder-Policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - dynamodb:BatchGetItem
+          - dynamodb:BatchWriteItem
+          - dynamodb:ConditionCheckItem
+          - dynamodb:PutItem
+          - dynamodb:DescribeTable
+          - dynamodb:DeleteItem
+          - dynamodb:GetItem
+          - dynamodb:Scan
+          - dynamodb:Query
+          - dynamodb:UpdateItem
+          Resource:
+          - Fn::GetAtt:
+            - PurchaseOrderTable
+            - Arn
+          - Fn::Join:
+            - /
+            - - Fn::GetAtt:
+                - PurchaseOrderTable
+                - Arn
+              - index
+              - '*'
+      Roles:
+      - Ref: PurchaseOrderExecutionRole
+    DependsOn:
+    - PurchaseOrderExecutionRole
+  DeliveryExecutionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: Viper-Delivery-Policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - dynamodb:BatchGetItem
+          - dynamodb:BatchWriteItem
+          - dynamodb:ConditionCheckItem
+          - dynamodb:PutItem
+          - dynamodb:DescribeTable
+          - dynamodb:DeleteItem
+          - dynamodb:GetItem
+          - dynamodb:Scan
+          - dynamodb:Query
+          - dynamodb:UpdateItem
+          Resource:
+          - Fn::GetAtt:
+            - RouteTable
+            - Arn
+          - Fn::Join:
+            - /
+            - - Fn::GetAtt:
+                - RouteTable
+                - Arn
+              - index
+              - '*'
+      Roles:
+      - Ref: DeliveryExecutionRole
+    DependsOn:
+    - DeliveryExecutionRole
+  PurchaseOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: Viper-PurchaseOrder-Function
+      CodeUri: s3://viper-sources/Viper-Stack/d2aa2d258b1d2c877b98a5a763523330
+      Handler: src/index.handler
+      MemorySize: 256
+      Runtime: nodejs14.x
+      Timeout: 25
+      Role:
+        Fn::GetAtt:
+        - PurchaseOrderExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: PurchaseOrderTable
+      Events:
+        ListPurchaseOrders:
+          Type: Api
+          Properties:
+            Path: /purchase-orders
+            Method: get
+            RestApiId:
+              Ref: ViperApi
+    DependsOn:
+    - PurchaseOrderExecutionPolicy
+  DeliveryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: Viper-Delivery-Function
+      CodeUri: s3://viper-sources/Viper-Stack/d87ce394915adb334d847dacd48bf564
+      Handler: src/index.handler
+      MemorySize: 256
+      Runtime: nodejs14.x
+      Timeout: 25
+      Role:
+        Fn::GetAtt:
+        - DeliveryExecutionRole
+        - Arn
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: RouteTable
+      Events:
+        CalculateRoutes:
+          Type: Api
+          Properties:
+            Path: /delivery
+            Method: post
+            RestApiId:
+              Ref: ViperApi
+    DependsOn:
+    - DeliveryExecutionPolicy
+  PurchaseOrderErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: Viper-PurchaseOrder-Error-Alarm
+      AlarmDescription:
+        Fn::Sub: Lambda *${PurchaseOrderFunction}* error alarm
+      Dimensions:
+      - Name: FunctionName
+        Value:
+          Ref: PurchaseOrderFunction
+      - Name: Resource
+        Value:
+          Ref: PurchaseOrderFunction
+      EvaluationPeriods: 1
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 3600
+      Statistic: Sum
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Threshold: 1
+      TreatMissingData: notBreaching
+  DeliveryErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: Viper-Delivery-Error-Alarm
+      AlarmDescription:
+        Fn::Sub: Lambda *${DeliveryFunction}* error alarm
+      Dimensions:
+      - Name: FunctionName
+        Value:
+          Ref: DeliveryFunction
+      - Name: Resource
+        Value:
+          Ref: DeliveryFunction
+      EvaluationPeriods: 1
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 3600
+      Statistic: Sum
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Threshold: 1
+      TreatMissingData: notBreaching

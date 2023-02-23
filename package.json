@@ -1,0 +1,10 @@
+{
+  "name": "viper",
+  "version": "1.0.0",
+  "description": "MISW4202-202311 Experiment 1 (Viper)",
+  "scripts": {
+    "deploy": "node deploy.js"
+  },
+  "author": "Camilo Tafur, Ivan Rodriguez",
+  "license": "ISC"
+}

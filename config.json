@@ -1,0 +1,6 @@
+{
+  "profile"  : "deployer",
+  "stack"    : "Viper-Stack",
+  "bucket"   : "viper-sources",
+  "template" : "template.yaml"
+}
