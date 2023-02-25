@@ -48,6 +48,21 @@ Resources:
         - AttributeName: id
           KeyType: HASH
 
+  # Routes Job Execution Role
+  RoutesJobExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Viper-RoutesJob-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
   # Purchase Order Execution Role
   PurchaseOrderExecutionRole:
     Type: AWS::IAM::Role
@@ -81,6 +96,25 @@ Resources:
               - sts:AssumeRole
     DependsOn:
       - RouteTable
+
+  # Routes Job Execution Policy
+  RoutesJobExecutionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: Viper-RoutesJob-Policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: '*'
+      Roles:
+        - !Ref RoutesJobExecutionRole
+    DependsOn:
+      - RoutesJobExecutionRole
 
   # Purchase Order Execution Policy
   PurchaseOrderExecutionPolicy:
@@ -150,6 +184,41 @@ Resources:
     DependsOn:
       - DeliveryExecutionRole
 
+  # Routes Job Function
+  RoutesJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: Viper-RoutesJob-Function
+      CodeUri: routes-job/
+      Handler: src/index.handler
+      MemorySize: 256
+      Runtime: nodejs14.x
+      Timeout: 25
+      Role: !GetAtt RoutesJobExecutionRole.Arn
+    DependsOn:
+      - RoutesJobExecutionPolicy
+
+  # Routes Job Rule
+  RoutesJobRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: Viper-RouteJobs-Rule
+      Description: 'Scheduled job for calculate the next day delivery routes'
+      State: ENABLED
+      ScheduleExpression: 'rate(5 minutes)'
+      Targets:
+        - Id: RoutesJobFunction
+          Arn: !GetAtt RoutesJobFunction.Arn
+
+  # Routes Job Permission
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RoutesJobFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RoutesJobRule.Arn
+
   # Purchase Order Function
   PurchaseOrderFunction:
     Type: AWS::Serverless::Function
@@ -212,7 +281,7 @@ Resources:
       EvaluationPeriods: 1
       MetricName: Errors
       Namespace: AWS/Lambda
-      Period: 3600
+      Period: 60
       Statistic: Sum
       ComparisonOperator: GreaterThanOrEqualToThreshold
       Threshold: 1
@@ -232,7 +301,7 @@ Resources:
       EvaluationPeriods: 1
       MetricName: Errors
       Namespace: AWS/Lambda
-      Period: 3600
+      Period: 60
       Statistic: Sum
       ComparisonOperator: GreaterThanOrEqualToThreshold
       Threshold: 1

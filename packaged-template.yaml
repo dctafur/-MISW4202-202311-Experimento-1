@@ -37,6 +37,19 @@ Resources:
       KeySchema:
       - AttributeName: id
         KeyType: HASH
+  RoutesJobExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Viper-RoutesJob-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
   PurchaseOrderExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -67,6 +80,23 @@ Resources:
           - sts:AssumeRole
     DependsOn:
     - RouteTable
+  RoutesJobExecutionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: Viper-RoutesJob-Policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: '*'
+      Roles:
+      - Ref: RoutesJobExecutionRole
+    DependsOn:
+    - RoutesJobExecutionRole
   PurchaseOrderExecutionPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -147,11 +177,50 @@ Resources:
       - Ref: DeliveryExecutionRole
     DependsOn:
     - DeliveryExecutionRole
+  RoutesJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: Viper-RoutesJob-Function
+      CodeUri: s3://viper-sources/Viper-Stack/f742c7a8fbec0e49c8d3dedeed0636e4
+      Handler: src/index.handler
+      MemorySize: 256
+      Runtime: nodejs14.x
+      Timeout: 25
+      Role:
+        Fn::GetAtt:
+        - RoutesJobExecutionRole
+        - Arn
+    DependsOn:
+    - RoutesJobExecutionPolicy
+  RoutesJobRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: Viper-RouteJobs-Rule
+      Description: Scheduled job for calculate the next day delivery routes
+      State: ENABLED
+      ScheduleExpression: rate(5 minutes)
+      Targets:
+      - Id: RoutesJobFunction
+        Arn:
+          Fn::GetAtt:
+          - RoutesJobFunction
+          - Arn
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: RoutesJobFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - RoutesJobRule
+        - Arn
   PurchaseOrderFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: Viper-PurchaseOrder-Function
-      CodeUri: s3://viper-sources/Viper-Stack/d2aa2d258b1d2c877b98a5a763523330
+      CodeUri: s3://viper-sources/Viper-Stack/2508879d60aacaa37b233f3eb11addd3
       Handler: src/index.handler
       MemorySize: 256
       Runtime: nodejs14.x
@@ -178,7 +247,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: Viper-Delivery-Function
-      CodeUri: s3://viper-sources/Viper-Stack/d87ce394915adb334d847dacd48bf564
+      CodeUri: s3://viper-sources/Viper-Stack/0498e5c489b131dc03666ce9adbbe6bd
       Handler: src/index.handler
       MemorySize: 256
       Runtime: nodejs14.x
